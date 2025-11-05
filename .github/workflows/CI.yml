@@ -1,47 +1,76 @@
-name: CI
+name: CI & Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    branches: [main] # 推到 main 才會部署
   pull_request:
-    branches: [main]
+    branches: [main] # PR 只跑檢查，不部署
+
+permissions:
+  contents: read
+  pages: write # 部署 Pages 需要
+  id-token: write # OIDC for deploy-pages
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
 
 jobs:
-  lint-and-build:
+  ci:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
+      # pnpm 10 + Node 20（有 pnpm 快取）
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "pnpm"
+          node-version: 20
+          cache: pnpm
 
-      - name: Install dependencies
-        run: pnpm install
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
 
       - name: Run ESLint
         run: pnpm lint:js
-        # continue-on-error: true
 
       - name: Run Stylelint
         run: pnpm lint:css
-        # continue-on-error: true
 
-      - name: Build project
+      - name: Build (Vite)
+        # 如果部署在 https://<user>.github.io/<REPO_NAME>/，可改成：
+        # run: pnpm build -- --base=/<REPO_NAME>/
         run: pnpm build
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+      # SPA 路由支援（Pages 會把未知路由導到 404.html）
+      - name: SPA fallback
+        run: cp dist/index.html dist/404.html
+
+      # 只在 push main 時，上傳 Pages artifact 給下一個 job 使用
+      - name: Upload Pages artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
         with:
-          name: dist
-          path: dist/
-          retention-days: 7
+          path: dist
+
+  deploy:
+    # 需要 ci 成功；且僅限 push main
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci.result == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
