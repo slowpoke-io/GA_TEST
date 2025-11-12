@@ -1,0 +1,48 @@
+name: fe-pr-preview
+on:
+  repository_dispatch:
+    types: [create-fe-pr-for-backend]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-or-update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Prepare branch name
+        id: br
+        run: echo "name=preview/be-pr-${{ github.event.client_payload.backend_pr }}" >> $GITHUB_OUTPUT
+
+      - name: Create/update branch & .env.preview
+        env:
+          BR: ${{ steps.br.outputs.name }}
+          URL: ${{ github.event.client_payload.backend_url }}
+        run: |
+          git fetch origin main
+          if git ls-remote --exit-code --heads origin "$BR"; then
+            git checkout "$BR"
+            git merge --no-edit origin/main || true
+          else
+            git checkout -b "$BR" origin/main
+          fi
+          echo "VITE_API_BASE=$URL" > .env.preview
+          git add .env.preview
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -m "preview(api): $URL" || git commit --allow-empty -m "preview: refresh"
+          git push -u origin "$BR"
+
+      - name: Open PR to main
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const br = `${{ steps.br.outputs.name }}`
+            const { owner, repo } = context.repo
+            const { data: prs } = await github.pulls.list({ owner, repo, state: 'open', head: `${owner}:${br}`, base: 'main' })
+            if (prs.length === 0) {
+              await github.pulls.create({ owner, repo, head: br, base: 'main', title: `FE Preview for BE PR #${context.payload.client_payload.backend_pr}` })
+            }
