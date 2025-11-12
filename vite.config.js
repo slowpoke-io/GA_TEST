@@ -21,6 +21,6 @@ export default ({ mode }) => {
             },
           },
     },
-    build: { outDir: "dist" },
+    // build: { outDir: "dist" },
   });
 };
