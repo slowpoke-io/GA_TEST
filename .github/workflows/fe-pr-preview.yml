@@ -23,17 +23,27 @@ jobs:
           BR: ${{ steps.br.outputs.name }}
           URL: ${{ github.event.client_payload.backend_url }}
         run: |
+          # --- 修改點：先設定全域 Git User，確保後面所有 commit (包含 fallback) 都能吃到 ---
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # -----------------------------------------------------------------------
+
           git fetch origin main
           if git ls-remote --exit-code --heads origin "$BR"; then
             git checkout "$BR"
+            # 嘗試 merge main，如果有 conflict 允許失敗 (或改用 reset)
             git merge --no-edit origin/main || true
           else
             git checkout -b "$BR" origin/main
           fi
+
           echo "VITE_API_BASE=$URL" > .env.preview
           git add .env.preview
-          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit -m "preview(api): $URL" || git commit --allow-empty -m "preview: refresh"
+
+          # 這裡現在安全了：如果第一個 commit 沒東西 (URL沒變)，
+          # 第二個 empty commit 會執行，且因為上面已經 config 過 user，不會再報錯
+          git commit -m "preview(api): $URL" || git commit --allow-empty -m "preview: refresh"
+
           git push -u origin "$BR"
 
       - name: Open PR to main
